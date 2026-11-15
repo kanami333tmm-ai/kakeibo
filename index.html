@@ -103,8 +103,14 @@
     <div class="card">
       <h2>レシートから読み取る</h2>
       <div id="ocrBox">
+        <div class="note" style="text-align:left">
+          <b>おすすめ(正確):</b>iPhoneのカメラか写真アプリで、レシートの文字を長押し →「すべてを選択」→「コピー」してから、下のボタンを押してください。
+        </div>
+        <button class="btn" style="margin-top:8px" id="pasteBtn">📋 コピーした文字から読み取る</button>
+        <textarea id="pasteArea" rows="4" class="hide" style="margin-top:8px" placeholder="ここを長押しして「ペースト」してください"></textarea>
+        <button class="btn sub hide" id="pasteGo" style="margin-top:6px">この文字から読み取る</button>
         <input type="file" id="ocrFile" accept="image/*" class="hide">
-        <button class="btn sub" style="margin-top:0" onclick="document.getElementById('ocrFile').click()">📷 レシートを撮影・選択</button>
+        <button class="btn sub" style="margin-top:10px" onclick="document.getElementById('ocrFile').click()">📷 写真から読み取る(かんたん・精度は低め)</button>
         <img id="ocrPreview" class="hide" alt="">
         <div class="prog hide" id="ocrProg"><div></div></div>
         <div class="note" id="ocrMsg" style="margin-top:6px">読み取った金額・日付・お店の名前を下の入力欄に入れます。内容を確かめてから保存してください。</div>
@@ -375,6 +381,7 @@ function resetOcr(doneMsg){
   img.removeAttribute('src'); img.classList.add('hide');
   $('ocrRaw').textContent = ''; $('ocrRawWrap').open = false; $('ocrRawWrap').classList.add('hide');
   $('ocrProg').classList.add('hide');
+  $('pasteArea').value = ''; $('pasteArea').classList.add('hide'); $('pasteGo').classList.add('hide');
   const msg = $('ocrMsg');
   msg.textContent = doneMsg || OCR_DEFAULT_MSG;
   msg.classList.toggle('ok', !!doneMsg);
@@ -616,8 +623,25 @@ function amountsIn(compact){
   }
   return out;
 }
+// 例:「小計/税/合計/お預り/お釣り」の後に「¥1,300/¥130/¥1,430/¥5,430/¥4,000」が続くとき、
+//     同じ順番どうしをつないで「合計 ¥1,430」のような行にする
+function pairColumns(lines){
+  const isAmt = s => /^[¥\\]?\d{1,3}(?:,\d{3})*[外内※*]?$|^[¥\\]\d+[外内※*]?$/.test(fixMoney(s.replace(/\s+/g, '')));
+  const hasAmt = s => /[¥\\]\d|\d,\d{3}/.test(fixMoney(s.replace(/\s+/g, '')));
+  const out = []; let i = 0;
+  while(i < lines.length){
+    let j = i; while(j < lines.length && !isAmt(lines[j]) && !hasAmt(lines[j])) j++;
+    let k = j; while(k < lines.length && isAmt(lines[k])) k++;
+    const L = j - i, A = k - j;
+    if(L >= 2 && A === L){                     // 項目名の数と金額の数が同じときだけつなぐ
+      for(let n = 0; n < L; n++) out.push(lines[i + n] + ' ' + lines[j + n]);
+      i = k;
+    } else { out.push(lines[i]); i++; }
+  }
+  return out;
+}
 function parseReceipt(raw){
-  const lines = normalize(raw).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const lines = pairColumns(normalize(raw).split(/\r?\n/).map(s => s.trim()).filter(Boolean));
   const compacts = lines.map(s => s.replace(/\s+/g, ''));
   const mc = compacts.map(fixMoney);   // 金額を探すとき用
   const res = {amount:null, date:null, store:null};
@@ -636,7 +660,7 @@ function parseReceipt(raw){
   // --- 合計金額 ---
   // 合計ではない金額の行(お預り・お釣り・現金で出した額・税など)
   const NG = /小計|対象|内税|外税|消費税|税率|内消費|預|参り|あずか|釣|約り|つり|ツリ|おつ|おるり|現金|ポイント|値引|割引|点数|個数|買上点/;
-  const KEY = [/総合計|合計|総計/, /お?買い?上げ?計?|お買上/, /ご?請求|お?支払|領収金額|決済金額/];
+  const KEY = [/総合計/, /合計|総計/, /お?買い?上げ?計?|お買上/, /ご?請求|お?支払|領収金額|決済金額/];
   const lastNum = s => { const n = amountsIn(s); return n.length ? n[n.length - 1] : null; };
   let found = null, fromKey = false;
   for(const key of KEY){
@@ -778,26 +802,48 @@ $('ocrFile').addEventListener('change', async e => {
       }
     });
     const { data } = await worker.recognize(canvas);
-    const r = parseReceipt(data.text || '');
-    $('ocrRaw').textContent = data.text || '';
-    $('ocrRawWrap').classList.remove('hide');
-    resetForm(); setTxType('expense');
-    if(r.amount) $('fAmount').value = r.amount;
-    if(r.date) $('fDate').value = r.date;
-    if(r.store) $('fStore').value = r.store;
-    const got = [r.amount ? `金額 ${yen(r.amount)}` : null, r.date ? `日付 ${r.date}` : null, r.store ? `お店 ${r.store}` : null].filter(Boolean);
-    msg.textContent = got.length
-      ? `読み取りました:${got.join('、')}。支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
-      : 'うまく読み取れませんでした。明るい場所で、レシートをまっすぐ写して撮り直すか、手で入力してください。';
-    showCands(r.candidates || [], r.amount);
+    applyReceiptText(data.text || '');
     bar.style.width = '100%';
-    $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
   }catch(err){
     msg.textContent = '読み取りに失敗しました:' + (err && err.message ? err.message : err);
   }finally{
     if(worker) try{ await worker.terminate(); }catch(_){}
     setTimeout(() => prog.classList.add('hide'), 800);
   }
+});
+
+// 読み取った文字から、金額・日付・お店を入力欄に入れる(写真・貼り付け共通)
+function applyReceiptText(text){
+  const msg = $('ocrMsg'), r = parseReceipt(text);
+  $('ocrRaw').textContent = text;
+  $('ocrRawWrap').classList.remove('hide');
+  resetForm(); setTxType('expense');
+  if(r.amount) $('fAmount').value = r.amount;
+  if(r.date) $('fDate').value = r.date;
+  if(r.store) $('fStore').value = r.store;
+  const got = [r.amount ? `金額 ${yen(r.amount)}` : null, r.date ? `日付 ${r.date}` : null, r.store ? `お店 ${r.store}` : null].filter(Boolean);
+  msg.classList.remove('ok');
+  msg.textContent = got.length
+    ? `読み取りました:${got.join('、')}。支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
+    : 'うまく読み取れませんでした。手で入力してください。';
+  showCands(r.candidates || [], r.amount);
+  $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
+}
+// 「コピーした文字から読み取る」:まずクリップボードを直接読む。できなければ貼り付け欄を出す
+$('pasteBtn').addEventListener('click', async () => {
+  resetOcr();
+  let text = '';
+  try{ if(navigator.clipboard && navigator.clipboard.readText) text = await navigator.clipboard.readText(); }catch(_){}
+  if(text && /\d/.test(text)){ applyReceiptText(text); return; }
+  $('pasteArea').value = ''; $('pasteArea').classList.remove('hide'); $('pasteGo').classList.remove('hide');
+  $('pasteArea').focus();
+  $('ocrMsg').textContent = 'コピーした文字を、上の欄に長押しで「ペースト」して「この文字から読み取る」を押してください。';
+});
+$('pasteGo').addEventListener('click', () => {
+  const text = $('pasteArea').value.trim();
+  if(!text){ toast('文字を貼り付けてください'); return; }
+  $('pasteArea').classList.add('hide'); $('pasteGo').classList.add('hide');
+  applyReceiptText(text);
 });
 
 /* ===== 全体の描き直し ===== */
