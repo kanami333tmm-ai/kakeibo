@@ -65,6 +65,9 @@
   .updown{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
   .updown button{width:34px;height:28px;border:1px solid var(--line);background:#fff;border-radius:6px;font-size:12px;color:var(--main);cursor:pointer;padding:0}
   .updown button:disabled{opacity:.3;cursor:default}
+  #ocrCands .lbl{font-size:12px;color:var(--sub);margin-bottom:4px}
+  #ocrCands button{border:1px solid var(--line);background:#fff;border-radius:99px;padding:6px 12px;margin:3px;font-size:15px;color:var(--ink);cursor:pointer}
+  #ocrCands button.on{background:var(--main);color:#fff;border-color:var(--main)}
   .note.ok{color:var(--plus);font-weight:600;font-size:14px}
   pre{white-space:pre-wrap;font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:160px;overflow:auto}
 </style>
@@ -105,6 +108,7 @@
         <img id="ocrPreview" class="hide" alt="">
         <div class="prog hide" id="ocrProg"><div></div></div>
         <div class="note" id="ocrMsg" style="margin-top:6px">読み取った金額・日付・お店の名前を下の入力欄に入れます。内容を確かめてから保存してください。</div>
+        <div id="ocrCands" class="hide" style="margin-top:8px"></div>
         <details id="ocrRawWrap" class="hide"><summary>読み取った文字をすべて見る</summary><pre id="ocrRaw"></pre></details>
       </div>
     </div>
@@ -374,7 +378,22 @@ function resetOcr(doneMsg){
   const msg = $('ocrMsg');
   msg.textContent = doneMsg || OCR_DEFAULT_MSG;
   msg.classList.toggle('ok', !!doneMsg);
+  showCands([]);
 }
+// 読み取った金額の候補をボタンで並べる(タップで金額欄に入る)
+function showCands(list, chosen){
+  const box = $('ocrCands');
+  if(!list.length){ box.innerHTML = ''; box.classList.add('hide'); return; }
+  box.innerHTML = '<div class="lbl">金額がちがうときは、正しい金額をタップ:</div>' +
+    list.map(v => `<button type="button" data-v="${v}" class="${v === chosen ? 'on' : ''}">${yen(v)}</button>`).join('');
+  box.classList.remove('hide');
+}
+$('ocrCands').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  $('fAmount').value = b.dataset.v;
+  $('ocrCands').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  toast(yen(Number(b.dataset.v)) + ' にしました');
+});
 $('cancelEdit').addEventListener('click', () => { resetForm(); showPanel('history'); });
 
 function editTx(id){
@@ -581,6 +600,12 @@ function normalize(s){
           .replace(/[，､]/g, ',').replace(/[．]/g, '.').replace(/[／]/g, '/').replace(/[：]/g, ':')
           .replace(/[￥]/g, '¥');
 }
+// 金額まわりの読み違いを直す(¥→y/v/\\、0→O、カンマ→点 など)
+function fixMoney(c){
+  return c.replace(/[\d.,Oo〇]+/g, m => /\d/.test(m) ? m.replace(/[Oo〇]/g, '0') : m)   // 4.OOO → 4.000
+    .replace(/(\d)[.・](\d{3})(?!\d)/g, '$1,$2')            // 1.430 → 1,430(円に小数はないため)
+    .replace(/(^|[^A-Za-z])[yYvVwW\\](?=\d)/g, '$1¥');      // y1,430 → ¥1,430
+}
 function amountsIn(compact){
   // 「1,234」「1234」「¥1,234」などを拾う(日付や電話番号っぽいものは呼び出し側で除外)
   const out = [];
@@ -594,6 +619,7 @@ function amountsIn(compact){
 function parseReceipt(raw){
   const lines = normalize(raw).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const compacts = lines.map(s => s.replace(/\s+/g, ''));
+  const mc = compacts.map(fixMoney);   // 金額を探すとき用
   const res = {amount:null, date:null, store:null};
 
   // --- 日付 ---
@@ -609,39 +635,40 @@ function parseReceipt(raw){
 
   // --- 合計金額 ---
   // 合計ではない金額の行(お預り・お釣り・現金で出した額・税など)
-  const NG = /小計|対象|内税|外税|消費税|税率|内消費|預|あずか|釣|つり|ツリ|おつ|現金|ポイント|値引|割引|点数|個数|買上点/;
+  const NG = /小計|対象|内税|外税|消費税|税率|内消費|預|参り|あずか|釣|約り|つり|ツリ|おつ|おるり|現金|ポイント|値引|割引|点数|個数|買上点/;
   const KEY = [/総合計|合計|総計/, /お?買い?上げ?計?|お買上/, /ご?請求|お?支払|領収金額|決済金額/];
   const lastNum = s => { const n = amountsIn(s); return n.length ? n[n.length - 1] : null; };
-  let found = null;
+  let found = null, fromKey = false;
   for(const key of KEY){
-    for(let i = 0; i < compacts.length && found === null; i++){
-      const c = compacts[i], m = c.match(key);
+    for(let i = 0; i < mc.length && found === null; i++){
+      const c = mc[i], m = c.match(key);
       if(!m) continue;
-      if(NG.test(c.slice(0, m.index))) continue;              // 「小計」「対象〜」などの行は飛ばす
+      const pre = c.slice(0, m.index);
+      if(NG.test(pre) || /り$/.test(pre)) continue;            // 「小計」「お預り合計」などの行は飛ばす
       let after = c.slice(m.index + m[0].length);
       const cut = after.search(NG);                            // 同じ行にお預り・お釣りが続くときは、そこで切る
       if(cut >= 0) after = after.slice(0, cut);
       let v = lastNum(after);
-      if(v === null && cut < 0 && compacts[i+1] && !NG.test(compacts[i+1])) v = lastNum(compacts[i+1]); // 金額が次の行にある場合
-      if(v !== null) found = v;
+      if(v === null && cut < 0 && mc[i+1] && !NG.test(mc[i+1])) v = lastNum(mc[i+1]); // 金額が次の行にある場合
+      if(v !== null){ found = v; fromKey = true; }
     }
     if(found !== null) break;
   }
   // お預り(現金で出した額)とお釣りから、合計を逆算して確かめる
   const pick = re => {
-    for(let i = 0; i < compacts.length; i++){
-      const c = compacts[i], m = c.match(re);
+    for(let i = 0; i < mc.length; i++){
+      const c = mc[i], m = c.match(re);
       if(!m) continue;
       let after = c.slice(m.index + m[0].length);
       const other = re === CHG ? DEP : CHG, cut = after.search(other);
       if(cut >= 0) after = after.slice(0, cut);
       let v = lastNum(after);
-      if(v === null && cut < 0 && compacts[i+1] && !NG.test(compacts[i+1])) v = lastNum(compacts[i+1]);
+      if(v === null && cut < 0 && mc[i+1] && !NG.test(mc[i+1])) v = lastNum(mc[i+1]);
       if(v !== null) return v;
     }
     return null;
   };
-  const DEP = /預|あずか|現金/, CHG = /釣|つり|ツリ|おつ/;
+  const DEP = /預|参り|あずか|現金|り合計/, CHG = /釣|約り|つり|ツリ|おつ|おるり/;
   const dep = pick(DEP), chg = pick(CHG);
   if(dep !== null && chg !== null && dep > chg){
     const t = dep - chg;
@@ -649,41 +676,69 @@ function parseReceipt(raw){
     if(found === null || found === dep || found === t + chg || found === t + chg + chg) found = t;
   }
   if(found === null){
-    // それでも見つからなければ「¥」付きの金額のうち一番大きいもの(お預り・お釣りの行は除く)
+    // 「合計」が読めなかったときは、¥付き(または1,234形式)の金額のうち一番大きいもの
+    // (お預り・お釣り・小計・税の行、電話番号や登録番号の行は除く)
     let best = 0;
-    compacts.forEach(c => {
-      if(NG.test(c) || /TEL|電話|No\.|番号|レジ/i.test(c)) return;
-      const m = c.match(/[¥\\](\d{1,3}(?:,\d{3})+|\d+)/g);
+    mc.forEach(c => {
+      if(NG.test(c) || /TEL|電話|No\.|番号|レジ|責|@/i.test(c)) return;
+      const m = c.match(/[¥\\](\d{1,3}(?:,\d{3})+|\d+)|\d{1,3}(?:,\d{3})+/g);
       if(m) m.forEach(s => { const v = parseInt(s.replace(/[¥\\,]/g,''),10); if(v > best && v < 10000000) best = v; });
     });
     if(best) found = best;
   }
+  // 「合計」の行から読めなかったときは、小計を手がかりにする(合計は 小計〜小計＋税10% の範囲)
+  if(!fromKey){
+    let sub = null;
+    for(const c of mc){ const m = c.match(/小計/); if(m){ sub = lastNum(c.slice(m.index + 2)); if(sub) break; } }
+    if(sub && (found === null || found < sub || found > Math.ceil(sub * 1.1) + 1)){
+      const inRange = [];
+      mc.forEach(c => {
+        if(/TEL|電話|No\.|番号|レジ|責|@|年|月|:/i.test(c)) return;
+        (c.match(/¥(\d{1,3}(?:,\d{3})+|\d+)|\d{1,3}(?:,\d{3})+/g) || []).forEach(s => {
+          const v = parseInt(s.replace(/[¥,]/g, ''), 10);
+          if(v >= sub && v <= Math.ceil(sub * 1.1) + 1) inRange.push(v);
+        });
+      });
+      if(dep !== null && chg !== null && dep > chg && dep - chg >= sub && dep - chg <= Math.ceil(sub * 1.1) + 1) inRange.push(dep - chg);
+      if(inRange.length) found = Math.max(...inRange);
+    }
+  }
   res.amount = found;
+  const cands = [];
+  const addC = v => { if(v && v >= 10 && v < 10000000 && !cands.includes(v)) cands.push(v); };
+  addC(found);
+  if(dep !== null && chg !== null && dep > chg) addC(dep - chg);
+  mc.forEach(c => {
+    if(/TEL|電話|No\.|番号|レジ|責|@|年|月|:/i.test(c)) return;
+    (c.match(/¥(\d{1,3}(?:,\d{3})+|\d+)|\d{1,3}(?:,\d{3})+/g) || []).forEach(s => addC(parseInt(s.replace(/[¥,]/g, ''), 10)));
+  });
+  res.candidates = [cands[0], ...cands.slice(1).sort((a, b) => b - a)].filter(Boolean).slice(0, 6);
 
   // --- お店の名前(上のほうの、文字が多めの行) ---
   const SKIP = /領収|レシート|明細|ご来店|ありがとう|いらっしゃい|TEL|電話|〒|http|www|^\d|登録番号|責|レジ|No\./i;
-  for(const c of compacts.slice(0, 8)){
-    if(SKIP.test(c)) continue;
+  const top = compacts.slice(0, 10).filter(c => !SKIP.test(c));
+  const shop = top.find(c => /店|ストア|マート|薬局|ドラッグ|商店|食堂/.test(c) && (c.match(/[ぁ-んァ-ヶ一-龠]/g) || []).length >= 3);
+  if(shop) res.store = shop.slice(0, 30);
+  else for(const c of top){
     const letters = (c.match(/[ぁ-んァ-ヶ一-龠a-zA-Z]/g) || []).length;
-    if(letters >= 2 && letters / c.length > 0.5){ res.store = c.slice(0, 30); break; }
+    if(letters >= 3 && letters / c.length > 0.6){ res.store = c.slice(0, 30); break; }
   }
   return res;
 }
 
-// 写真を読み取りやすく整える(縮小・白黒・コントラスト強め)
+// 写真を読み取りやすく整える(大きすぎる写真の縮小・白黒)
 function prepareImage(file){
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const MAX = 1800;
+      const MAX = 2400;
       const s = Math.min(1, MAX / Math.max(img.width, img.height));
       const w = Math.round(img.width * s), h = Math.round(img.height * s);
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
       const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
       const px = ctx.getImageData(0, 0, w, h), d = px.data;
       for(let i = 0; i < d.length; i += 4){
-        let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-        g = Math.max(0, Math.min(255, (g - 128) * 1.6 + 140));
+        const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];   // 白黒にするだけ(コントラストを強めると読み取りが悪くなるため)
         d[i] = d[i+1] = d[i+2] = g;
       }
       ctx.putImageData(px, 0, 0);
@@ -710,7 +765,7 @@ $('ocrFile').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if(!f) return;
   const prog = $('ocrProg'), bar = prog.firstElementChild, msg = $('ocrMsg');
   $('ocrPreview').src = URL.createObjectURL(f); $('ocrPreview').classList.remove('hide');
-  prog.classList.remove('hide'); bar.style.width = '5%'; msg.classList.remove('ok');
+  prog.classList.remove('hide'); bar.style.width = '5%'; msg.classList.remove('ok'); showCands([]);
   msg.textContent = '準備しています…(はじめての時は日本語データの読み込みに少し時間がかかります)';
   let worker;
   try{
@@ -734,6 +789,7 @@ $('ocrFile').addEventListener('change', async e => {
     msg.textContent = got.length
       ? `読み取りました:${got.join('、')}。支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
       : 'うまく読み取れませんでした。明るい場所で、レシートをまっすぐ写して撮り直すか、手で入力してください。';
+    showCands(r.candidates || [], r.amount);
     bar.style.width = '100%';
     $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
   }catch(err){
