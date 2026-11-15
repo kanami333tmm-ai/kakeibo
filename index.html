@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="家計簿">
+<meta name="theme-color" content="#2f6f5e">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<title>かんたん家計簿</title>
+<style>
+  :root{
+    --bg:#f4f6f5; --card:#fff; --ink:#1f2a27; --sub:#66736f; --line:#dfe5e2;
+    --main:#2f6f5e; --main2:#e3f0ec; --minus:#c0392b; --plus:#1e7d46; --card-c:#7a4fb3;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;font-size:16px}
+  body{display:flex;flex-direction:column;height:100dvh}
+  header{background:var(--main);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;
+    display:flex;justify-content:space-between;align-items:center}
+  header h1{font-size:18px;margin:0}
+  header .who{font-size:13px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:99px}
+  main{flex:1;overflow-y:auto;padding:14px;max-width:720px;width:100%;margin:0 auto}
+  nav{display:flex;background:#fff;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;border:0;background:none;padding:8px 0 10px;font-size:12px;color:var(--sub);cursor:pointer}
+  nav button .i{display:block;font-size:20px;line-height:1.3}
+  nav button.on{color:var(--main);font-weight:700}
+  .panel{display:none}.panel.on{display:block}
+  .card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .card h2{font-size:15px;margin:0 0 10px;color:var(--sub);font-weight:600}
+  .big{font-size:28px;font-weight:700}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:8px}
+  .row:last-child{border-bottom:0}
+  .row .l{min-width:0}.row .l small{display:block;color:var(--sub);font-size:12px;margin-top:2px}
+  .amt{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+  .minus{color:var(--minus)}.plus{color:var(--plus)}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;margin-right:6px;vertical-align:1px}
+  .t-cash{background:#fff3d6;color:#8a5a00}.t-bank{background:#dceeff;color:#1d5d99}.t-card{background:#efe4fa;color:var(--card-c)}
+  label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+  input,select,textarea{width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  .seg{display:flex;gap:6px}
+  .seg button{flex:1;padding:10px;border:1px solid var(--line);background:#fff;border-radius:8px;font-size:15px;cursor:pointer}
+  .seg button.on{background:var(--main);color:#fff;border-color:var(--main)}
+  .btn{display:block;width:100%;padding:12px;border:0;border-radius:10px;background:var(--main);color:#fff;font-size:16px;font-weight:600;margin-top:14px;cursor:pointer}
+  .btn.sub{background:var(--main2);color:var(--main)}
+  .btn.danger{background:#fbe9e7;color:var(--minus)}
+  .btn.sm{display:inline-block;width:auto;padding:6px 12px;font-size:13px;margin:0}
+  .two{display:flex;gap:10px}.two>div{flex:1}
+  .note{font-size:12px;color:var(--sub);line-height:1.6}
+  .hide{display:none!important}
+  #ocrBox{border:2px dashed var(--line);border-radius:10px;padding:12px;text-align:center}
+  #ocrPreview{max-width:100%;max-height:200px;border-radius:8px;margin-top:8px}
+  .prog{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px}
+  .prog div{height:100%;width:0;background:var(--main);transition:width .2s}
+  .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#1f2a27;color:#fff;padding:10px 18px;border-radius:99px;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9}
+  .toast.on{opacity:1}
+  .bar{height:6px;background:var(--main2);border-radius:99px;margin-top:4px;overflow:hidden}
+  .bar div{height:100%;background:var(--main)}
+  .monthnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .monthnav button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font-size:15px;cursor:pointer}
+  .empty{color:var(--sub);text-align:center;padding:16px 0;font-size:14px}
+  details summary{cursor:pointer;color:var(--sub);font-size:13px;margin-top:8px}
+  pre{white-space:pre-wrap;font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:160px;overflow:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>かんたん家計簿</h1>
+  <span class="who" id="whoLabel"></span>
+</header>
+
+<main>
+  <!-- ホーム -->
+  <section class="panel on" id="p-home">
+    <div class="card">
+      <h2>使えるお金(現金+口座)</h2>
+      <div class="big" id="netAssets">¥0</div>
+      <div class="note" id="cardDebtLine"></div>
+    </div>
+    <div class="card">
+      <h2>口座ごとの残高</h2>
+      <div id="homeAccounts"></div>
+    </div>
+    <div class="card">
+      <h2 id="monthTitle">今月の支出</h2>
+      <div class="big minus" id="monthExpense">¥0</div>
+      <div class="note" id="monthIncome"></div>
+      <div id="catBreakdown" style="margin-top:10px"></div>
+    </div>
+  </section>
+
+  <!-- 入力 -->
+  <section class="panel" id="p-input">
+    <div class="card">
+      <h2>レシートから読み取る</h2>
+      <div id="ocrBox">
+        <input type="file" id="ocrFile" accept="image/*" class="hide">
+        <button class="btn sub" style="margin-top:0" onclick="document.getElementById('ocrFile').click()">📷 レシートを撮影・選択</button>
+        <img id="ocrPreview" class="hide" alt="">
+        <div class="prog hide" id="ocrProg"><div></div></div>
+        <div class="note" id="ocrMsg" style="margin-top:6px">読み取った金額・日付・お店の名前を下の入力欄に入れます。内容を確かめてから保存してください。</div>
+        <details id="ocrRawWrap" class="hide"><summary>読み取った文字をすべて見る</summary><pre id="ocrRaw"></pre></details>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="formTitle">記録する</h2>
+      <div class="seg" id="typeSeg">
+        <button data-t="expense" class="on">支出</button>
+        <button data-t="income">収入</button>
+        <button data-t="transfer">振替</button>
+      </div>
+      <div class="two">
+        <div><label>日付</label><input type="date" id="fDate"></div>
+        <div><label>金額(円)</label><input type="number" id="fAmount" inputmode="numeric" min="0" placeholder="0"></div>
+      </div>
+      <div id="wrapFrom"><label id="lblFrom">支払い元</label><select id="fFrom"></select></div>
+      <div id="wrapTo" class="hide"><label id="lblTo">入金先</label><select id="fTo"></select></div>
+      <div id="wrapCat"><label>分類</label><select id="fCat"></select></div>
+      <label>お店・内容</label><input type="text" id="fStore" placeholder="例:スーパー〇〇">
+      <label>メモ</label><input type="text" id="fMemo" placeholder="任意">
+      <button class="btn" id="saveTx">保存する</button>
+      <button class="btn sub hide" id="cancelEdit">編集をやめる</button>
+    </div>
+  </section>
+
+  <!-- 履歴 -->
+  <section class="panel" id="p-history">
+    <div class="monthnav">
+      <button onclick="shiftMonth(-1)">◀</button>
+      <strong id="histMonth"></strong>
+      <button onclick="shiftMonth(1)">▶</button>
+    </div>
+    <div class="card">
+      <label style="margin-top:0">口座でしぼりこむ</label>
+      <select id="histFilter"><option value="">すべて</option></select>
+    </div>
+    <div class="card" id="histList"></div>
+  </section>
+
+  <!-- 口座 -->
+  <section class="panel" id="p-accounts">
+    <div class="card">
+      <h2>登録している口座</h2>
+      <div id="accList"></div>
+    </div>
+    <div class="card">
+      <h2 id="accFormTitle">口座を追加する</h2>
+      <label>種類</label>
+      <div class="seg" id="accTypeSeg">
+        <button data-t="cash" class="on">現金</button>
+        <button data-t="bank">銀行口座</button>
+        <button data-t="card">クレカ</button>
+      </div>
+      <label>名前</label><input type="text" id="aName" placeholder="例:財布、〇〇銀行、〇〇カード">
+      <label id="lblInit">今の残高(円)</label><input type="number" id="aInit" inputmode="numeric" placeholder="0">
+      <div id="wrapPay" class="hide">
+        <label>引き落とし口座</label><select id="aPay"></select>
+        <div class="two">
+          <div><label>締め日</label><input type="number" id="aClose" min="1" max="31" placeholder="例:15(末日は31)"></div>
+          <div><label>引き落とし日</label><input type="number" id="aDue" min="1" max="31" placeholder="例:10"></div>
+        </div>
+        <div class="note">クレカで払った分は「未払い額」として積み上がり、引き落としを記録すると銀行口座から差し引かれます。</div>
+      </div>
+      <button class="btn" id="saveAcc">追加する</button>
+      <button class="btn sub hide" id="cancelAcc">編集をやめる</button>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="panel" id="p-settings">
+    <div class="card">
+      <h2>使う人</h2>
+      <div class="note">使う人ごとに、口座や記録がまったく別に保存されます。1台を何人かで使うときに切り替えてください。</div>
+      <label>今使っている人</label>
+      <select id="profileSel"></select>
+      <div class="two">
+        <div><button class="btn sub" id="addProfile">人を追加</button></div>
+        <div><button class="btn sub" id="renameProfile">名前を変える</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>分類(カテゴリ)</h2>
+      <label>支出の分類(「、」区切り)</label><textarea id="catExp" rows="3"></textarea>
+      <label>収入の分類(「、」区切り)</label><textarea id="catInc" rows="2"></textarea>
+      <button class="btn sub" id="saveCats">分類を保存</button>
+    </div>
+    <div class="card">
+      <h2>バックアップ</h2>
+      <div class="note">データはこの端末のブラウザの中だけに保存されます。機種変更や消えたときのために、ときどきバックアップを保存してください。</div>
+      <button class="btn sub" id="exportBtn">バックアップを保存</button>
+      <input type="file" id="importFile" accept=".json,application/json" class="hide">
+      <button class="btn sub" onclick="document.getElementById('importFile').click()">バックアップから戻す</button>
+      <button class="btn danger" id="deleteProfile">この人のデータをすべて消す</button>
+    </div>
+  </section>
+</main>
+
+<nav id="tabs">
+  <button data-p="home" class="on"><span class="i">🏠</span>ホーム</button>
+  <button data-p="input"><span class="i">✏️</span>入力</button>
+  <button data-p="history"><span class="i">📋</span>履歴</button>
+  <button data-p="accounts"><span class="i">💳</span>口座</button>
+  <button data-p="settings"><span class="i">⚙️</span>設定</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== 保存まわり ===== */
+const PKEY = 'kakeibo_profiles';
+const DEFAULT_EXP = ['食費','日用品','外食','交通','車','住まい','水道光熱','通信','医療','衣服','趣味・娯楽','交際','教育','保険','税金','その他'];
+const DEFAULT_INC = ['給与','賞与','副収入','その他'];
+
+function load(key, fallback){
+  try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; }
+}
+function save(key, val){
+  try{ localStorage.setItem(key, JSON.stringify(val)); return true; }
+  catch(e){ toast('保存できませんでした'); return false; }
+}
+function blankData(){
+  return { accounts:[], txs:[], cats:{expense:DEFAULT_EXP.slice(), income:DEFAULT_INC.slice()} };
+}
+let profiles = load(PKEY, null);
+if(!profiles || !profiles.list || !profiles.list.length){ profiles = {list:['わたし'], current:'わたし'}; save(PKEY, profiles); }
+if(!profiles.list.includes(profiles.current)) profiles.current = profiles.list[0];
+const dataKey = name => 'kakeibo_data_' + name;
+let D = load(dataKey(profiles.current), null) || blankData();
+function persist(){ save(dataKey(profiles.current), D); }
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+
+/* ===== 小さな道具 ===== */
+const $ = id => document.getElementById(id);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const yen = n => (n < 0 ? '-¥' : '¥') + Math.abs(Math.round(n)).toLocaleString('ja-JP');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+const TYPE_LABEL = {cash:'現金', bank:'銀行', card:'クレカ'};
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'),2000); }
+const accById = id => D.accounts.find(a => a.id === id);
+const accName = id => { const a = accById(id); return a ? a.name : '(削除した口座)'; };
+
+/* ===== 残高計算 ===== */
+// 残高 = 最初の残高 + 入ってきたお金 - 出ていったお金
+// クレカは「マイナス=未払い額」として扱う
+function balances(){
+  const b = {};
+  D.accounts.forEach(a => b[a.id] = a.type === 'card' ? -(Number(a.initial)||0) : (Number(a.initial)||0));
+  D.txs.forEach(t => {
+    const amt = Number(t.amount) || 0;
+    if(t.type === 'expense' && t.from in b) b[t.from] -= amt;
+    if(t.type === 'income'  && t.to   in b) b[t.to]   += amt;
+    if(t.type === 'transfer'){ if(t.from in b) b[t.from] -= amt; if(t.to in b) b[t.to] += amt; }
+  });
+  return b;
+}
+
+/* ===== タブ ===== */
+let curPanel = 'home';
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  showPanel(b.dataset.p);
+});
+function showPanel(p){
+  curPanel = p;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x.dataset.p === p));
+  document.querySelectorAll('.panel').forEach(x => x.classList.toggle('on', x.id === 'p-' + p));
+  render();
+  document.querySelector('main').scrollTop = 0;
+}
+
+/* ===== ホーム ===== */
+function renderHome(){
+  const b = balances();
+  let assets = 0, debt = 0;
+  const rows = D.accounts.map(a => {
+    const v = b[a.id];
+    if(a.type === 'card') debt += -v; else assets += v;
+    const shown = a.type === 'card'
+      ? `<span class="amt ${-v>0?'minus':''}">未払い ${yen(-v)}</span>`
+      : `<span class="amt ${v<0?'minus':''}">${yen(v)}</span>`;
+    return `<div class="row"><div class="l"><span class="tag t-${a.type}">${TYPE_LABEL[a.type]}</span>${esc(a.name)}</div>${shown}</div>`;
+  });
+  $('homeAccounts').innerHTML = rows.length ? rows.join('') :
+    '<div class="empty">まだ口座がありません。<br>「口座」タブから財布・銀行口座・クレカを登録してください。</div>';
+  $('netAssets').textContent = yen(assets);
+  $('cardDebtLine').textContent = debt ? `クレカの未払い ${yen(debt)} を引くと ${yen(assets - debt)}` : '';
+
+  const ym = today().slice(0,7);
+  const m = D.txs.filter(t => (t.date||'').slice(0,7) === ym);
+  const exp = m.filter(t => t.type === 'expense');
+  const total = exp.reduce((s,t) => s + (Number(t.amount)||0), 0);
+  const inc = m.filter(t => t.type === 'income').reduce((s,t) => s + (Number(t.amount)||0), 0);
+  $('monthTitle').textContent = `今月(${Number(ym.slice(5))}月)の支出`;
+  $('monthExpense').textContent = yen(total);
+  $('monthIncome').textContent = inc ? `収入 ${yen(inc)}／差し引き ${yen(inc - total)}` : '';
+  const byCat = {};
+  exp.forEach(t => byCat[t.category || 'その他'] = (byCat[t.category || 'その他'] || 0) + (Number(t.amount)||0));
+  const cats = Object.entries(byCat).sort((x,y) => y[1]-x[1]);
+  $('catBreakdown').innerHTML = cats.map(([c,v]) =>
+    `<div style="margin:8px 0"><div class="row" style="padding:0;border:0"><span>${esc(c)}</span><span class="amt">${yen(v)}</span></div>
+     <div class="bar"><div style="width:${total? (v/total*100).toFixed(1):0}%"></div></div></div>`).join('');
+}
+
+/* ===== 入力フォーム ===== */
+let txType = 'expense', editingTx = null;
+$('typeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  setTxType(b.dataset.t);
+});
+function setTxType(t){
+  txType = t;
+  document.querySelectorAll('#typeSeg button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('wrapFrom').classList.toggle('hide', t === 'income');
+  $('wrapTo').classList.toggle('hide', t === 'expense');
+  $('wrapCat').classList.toggle('hide', t === 'transfer');
+  $('lblFrom').textContent = t === 'transfer' ? '出金元' : '支払い元';
+  $('lblTo').textContent = t === 'transfer' ? '入金先(クレカの引き落としはクレカを選ぶ)' : '入金先';
+  fillSelects();
+}
+function accOptions(filter, sel){
+  const list = D.accounts.filter(filter);
+  if(!list.length) return '<option value="">(口座を登録してください)</option>';
+  return list.map(a => `<option value="${a.id}" ${a.id===sel?'selected':''}>${TYPE_LABEL[a.type]}:${esc(a.name)}</option>`).join('');
+}
+function fillSelects(keep){
+  const f = keep ? keep.from : $('fFrom').value, to = keep ? keep.to : $('fTo').value, c = keep ? keep.cat : $('fCat').value;
+  $('fFrom').innerHTML = txType === 'transfer' ? accOptions(a => a.type !== 'card', f) : accOptions(() => true, f);
+  $('fTo').innerHTML = txType === 'transfer' ? accOptions(() => true, to) : accOptions(a => a.type !== 'card', to);
+  const cats = txType === 'income' ? D.cats.income : D.cats.expense;
+  $('fCat').innerHTML = cats.map(x => `<option ${x===c?'selected':''}>${esc(x)}</option>`).join('');
+}
+function resetForm(){
+  editingTx = null;
+  $('fDate').value = today(); $('fAmount').value = ''; $('fStore').value = ''; $('fMemo').value = '';
+  $('formTitle').textContent = '記録する'; $('saveTx').textContent = '保存する';
+  $('cancelEdit').classList.add('hide');
+}
+$('saveTx').addEventListener('click', () => {
+  const amount = Math.round(Number($('fAmount').value));
+  if(!amount || amount <= 0){ toast('金額を入れてください'); return; }
+  if(!D.accounts.length){ toast('先に口座を登録してください'); return; }
+  const t = {
+    id: editingTx || uid(), type: txType, date: $('fDate').value || today(), amount,
+    from: txType === 'income' ? null : $('fFrom').value,
+    to: txType === 'expense' ? null : $('fTo').value,
+    category: txType === 'transfer' ? '振替' : $('fCat').value,
+    store: $('fStore').value.trim(), memo: $('fMemo').value.trim()
+  };
+  if(txType === 'transfer' && t.from === t.to){ toast('出金元と入金先が同じです'); return; }
+  if(editingTx){ const i = D.txs.findIndex(x => x.id === editingTx); if(i >= 0) D.txs[i] = t; }
+  else D.txs.push(t);
+  persist();
+  toast(editingTx ? '変更しました' : '保存しました');
+  const wasEdit = !!editingTx;
+  resetForm();
+  if(wasEdit) showPanel('history'); else render();
+});
+$('cancelEdit').addEventListener('click', () => { resetForm(); showPanel('history'); });
+
+function editTx(id){
+  const t = D.txs.find(x => x.id === id); if(!t) return;
+  showPanel('input');
+  setTxType(t.type);
+  fillSelects({from:t.from, to:t.to, cat:t.category});
+  editingTx = id;
+  $('fDate').value = t.date; $('fAmount').value = t.amount; $('fStore').value = t.store || ''; $('fMemo').value = t.memo || '';
+  $('formTitle').textContent = '記録を直す'; $('saveTx').textContent = '変更を保存';
+  $('cancelEdit').classList.remove('hide');
+}
+function deleteTx(id){
+  if(!confirm('この記録を消しますか?')) return;
+  D.txs = D.txs.filter(x => x.id !== id); persist(); render(); toast('消しました');
+}
+
+/* ===== 履歴 ===== */
+let histYM = today().slice(0,7);
+function shiftMonth(n){
+  let [y,m] = histYM.split('-').map(Number); m += n;
+  if(m < 1){ m = 12; y--; } if(m > 12){ m = 1; y++; }
+  histYM = y + '-' + String(m).padStart(2,'0'); renderHistory();
+}
+$('histFilter').addEventListener('change', renderHistory);
+function renderHistory(){
+  const [y,m] = histYM.split('-');
+  $('histMonth').textContent = `${y}年${Number(m)}月`;
+  const fsel = $('histFilter'), fv = fsel.value;
+  fsel.innerHTML = '<option value="">すべて</option>' + D.accounts.map(a => `<option value="${a.id}" ${a.id===fv?'selected':''}>${TYPE_LABEL[a.type]}:${esc(a.name)}</option>`).join('');
+  const list = D.txs.filter(t => (t.date||'').slice(0,7) === histYM && (!fv || t.from === fv || t.to === fv))
+    .sort((a,b) => (b.date||'').localeCompare(a.date||'') || 0);
+  if(!list.length){ $('histList').innerHTML = '<div class="empty">この月の記録はありません</div>'; return; }
+  $('histList').innerHTML = list.map(t => {
+    let where, cls, sign;
+    if(t.type === 'expense'){ where = accName(t.from); cls='minus'; sign='-'; }
+    else if(t.type === 'income'){ where = accName(t.to); cls='plus'; sign='+'; }
+    else { where = accName(t.from) + ' → ' + accName(t.to); cls=''; sign=''; }
+    const title = t.store || t.category || '';
+    const d = t.date ? `${Number(t.date.slice(5,7))}/${Number(t.date.slice(8,10))}` : '';
+    return `<div class="row"><div class="l">${esc(title)}<small>${d}・${esc(t.type==='transfer'?'振替':t.category)}・${esc(where)}${t.memo?'・'+esc(t.memo):''}</small></div>
+      <div style="text-align:right"><div class="amt ${cls}">${sign}${yen(t.amount).replace('-','')}</div>
+      <button class="btn sm sub" onclick="editTx('${t.id}')">直す</button>
+      <button class="btn sm danger" onclick="deleteTx('${t.id}')">消す</button></div></div>`;
+  }).join('');
+}
+
+/* ===== 口座 ===== */
+let accType = 'cash', editingAcc = null;
+$('accTypeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  setAccType(b.dataset.t);
+});
+function setAccType(t){
+  accType = t;
+  document.querySelectorAll('#accTypeSeg button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('wrapPay').classList.toggle('hide', t !== 'card');
+  $('lblInit').textContent = t === 'card' ? '今の未払い額(円・なければ0)' : '今の残高(円)';
+  $('aPay').innerHTML = '<option value="">(未設定)</option>' + D.accounts.filter(a => a.type === 'bank').map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+}
+function resetAccForm(){
+  editingAcc = null; $('aName').value = ''; $('aInit').value = ''; $('aClose').value = ''; $('aDue').value = '';
+  $('accFormTitle').textContent = '口座を追加する'; $('saveAcc').textContent = '追加する';
+  $('cancelAcc').classList.add('hide');
+  document.querySelectorAll('#accTypeSeg button').forEach(x => x.disabled = false);
+  setAccType('cash');
+}
+$('saveAcc').addEventListener('click', () => {
+  const name = $('aName').value.trim();
+  if(!name){ toast('名前を入れてください'); return; }
+  const a = { id: editingAcc || uid(), type: accType, name, initial: Math.round(Number($('aInit').value) || 0) };
+  if(accType === 'card'){ a.payFrom = $('aPay').value || null; a.closeDay = Number($('aClose').value) || null; a.dueDay = Number($('aDue').value) || null; }
+  if(editingAcc){ const i = D.accounts.findIndex(x => x.id === editingAcc); if(i >= 0) D.accounts[i] = a; }
+  else D.accounts.push(a);
+  persist(); toast(editingAcc ? '変更しました' : '追加しました'); resetAccForm(); render();
+});
+$('cancelAcc').addEventListener('click', resetAccForm);
+function editAcc(id){
+  const a = accById(id); if(!a) return;
+  setAccType(a.type);
+  document.querySelectorAll('#accTypeSeg button').forEach(x => x.disabled = x.dataset.t !== a.type);
+  editingAcc = id; $('aName').value = a.name; $('aInit').value = a.initial;
+  if(a.type === 'card'){ $('aPay').value = a.payFrom || ''; $('aClose').value = a.closeDay || ''; $('aDue').value = a.dueDay || ''; }
+  $('accFormTitle').textContent = '口座を直す'; $('saveAcc').textContent = '変更を保存';
+  $('cancelAcc').classList.remove('hide');
+  $('accFormTitle').scrollIntoView({behavior:'smooth'});
+}
+function deleteAcc(id){
+  const used = D.txs.some(t => t.from === id || t.to === id);
+  if(!confirm(used ? 'この口座を使った記録があります。口座を消すと、その記録は「削除した口座」と表示されます。消しますか?' : 'この口座を消しますか?')) return;
+  D.accounts = D.accounts.filter(a => a.id !== id); persist(); render(); toast('消しました');
+}
+// クレカの引き落としを記録(銀行 → クレカへの振替として入力欄に用意)
+function payCard(id){
+  const a = accById(id), b = balances();
+  const unpaid = Math.max(0, -b[id]);
+  showPanel('input'); resetForm(); setTxType('transfer');
+  fillSelects({from: a.payFrom || '', to: id, cat: ''});
+  $('fAmount').value = unpaid || '';
+  $('fStore').value = a.name + ' 引き落とし';
+  toast('金額を確かめて保存してください');
+}
+function renderAccounts(){
+  const b = balances();
+  $('accList').innerHTML = D.accounts.length ? D.accounts.map(a => {
+    const v = b[a.id];
+    let extra = '';
+    if(a.type === 'card'){
+      const bits = [];
+      bits.push('引き落とし:' + (a.payFrom ? accName(a.payFrom) : '未設定'));
+      if(a.closeDay) bits.push((a.closeDay >= 31 ? '末日' : a.closeDay + '日') + '締め');
+      if(a.dueDay) bits.push(a.dueDay + '日払い');
+      extra = `<small>${esc(bits.join('・'))}</small>`;
+    }
+    const amt = a.type === 'card' ? `<span class="amt ${-v>0?'minus':''}">未払い ${yen(-v)}</span>` : `<span class="amt">${yen(v)}</span>`;
+    return `<div class="row"><div class="l"><span class="tag t-${a.type}">${TYPE_LABEL[a.type]}</span>${esc(a.name)}${extra}</div>
+      <div style="text-align:right">${amt}<div style="margin-top:4px">
+      ${a.type==='card'?`<button class="btn sm" onclick="payCard('${a.id}')">引き落とし</button> `:''}
+      <button class="btn sm sub" onclick="editAcc('${a.id}')">直す</button>
+      <button class="btn sm danger" onclick="deleteAcc('${a.id}')">消す</button></div></div></div>`;
+  }).join('') : '<div class="empty">まだ口座がありません</div>';
+}
+
+/* ===== 設定 ===== */
+function renderSettings(){
+  $('profileSel').innerHTML = profiles.list.map(n => `<option ${n===profiles.current?'selected':''}>${esc(n)}</option>`).join('');
+  $('catExp').value = D.cats.expense.join('、');
+  $('catInc').value = D.cats.income.join('、');
+}
+function switchProfile(name){
+  profiles.current = name; save(PKEY, profiles);
+  D = load(dataKey(name), null) || blankData();
+  resetForm(); resetAccForm(); render(); toast(name + ' に切り替えました');
+}
+$('profileSel').addEventListener('change', e => switchProfile(e.target.value));
+$('addProfile').addEventListener('click', () => {
+  const n = (prompt('追加する人の名前') || '').trim();
+  if(!n) return;
+  if(profiles.list.includes(n)){ toast('同じ名前がすでにあります'); return; }
+  profiles.list.push(n); save(PKEY, profiles); switchProfile(n);
+});
+$('renameProfile').addEventListener('click', () => {
+  const old = profiles.current;
+  const n = (prompt('新しい名前', old) || '').trim();
+  if(!n || n === old) return;
+  if(profiles.list.includes(n)){ toast('同じ名前がすでにあります'); return; }
+  if(!save(dataKey(n), D)) return;
+  try{ localStorage.removeItem(dataKey(old)); }catch(e){}
+  profiles.list[profiles.list.indexOf(old)] = n; profiles.current = n; save(PKEY, profiles); render();
+});
+$('saveCats').addEventListener('click', () => {
+  const split = s => s.split(/[、,，\n]/).map(x => x.trim()).filter(Boolean);
+  const e = split($('catExp').value), i = split($('catInc').value);
+  if(!e.length || !i.length){ toast('分類を1つ以上入れてください'); return; }
+  D.cats.expense = e; D.cats.income = i; persist(); toast('分類を保存しました'); fillSelects();
+});
+$('exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify({app:'kakeibo', version:1, profile:profiles.current, data:D}, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `家計簿_${profiles.current}_${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+});
+$('importFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  try{
+    const j = JSON.parse(await f.text());
+    const d = j.data || j;
+    if(!Array.isArray(d.accounts) || !Array.isArray(d.txs)) throw new Error('形式が違います');
+    if(!confirm(`「${profiles.current}」のデータを、このバックアップで置き換えますか?`)) return;
+    D = { accounts:d.accounts, txs:d.txs, cats: d.cats && d.cats.expense ? d.cats : blankData().cats };
+    persist(); render(); toast('戻しました');
+  }catch(err){ toast('読み込めませんでした'); }
+});
+$('deleteProfile').addEventListener('click', () => {
+  if(!confirm(`「${profiles.current}」の口座と記録をすべて消します。元に戻せません。よろしいですか?`)) return;
+  const name = profiles.current;
+  try{ localStorage.removeItem(dataKey(name)); }catch(e){}
+  if(profiles.list.length > 1){
+    profiles.list = profiles.list.filter(n => n !== name);
+    switchProfile(profiles.list[0]);
+  } else { D = blankData(); persist(); render(); toast('消しました'); }
+});
+
+/* ===== レシート読み取り ===== */
+// 全角数字などを半角にそろえる
+function normalize(s){
+  return s.replace(/[０-９Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+          .replace(/[，､]/g, ',').replace(/[．]/g, '.').replace(/[／]/g, '/').replace(/[：]/g, ':')
+          .replace(/[￥]/g, '¥');
+}
+function amountsIn(compact){
+  // 「1,234」「1234」「¥1,234」などを拾う(日付や電話番号っぽいものは呼び出し側で除外)
+  const out = [];
+  const re = /(\d{1,3}(?:,\d{3})+|\d+)/g; let m;
+  while((m = re.exec(compact))) {
+    const v = parseInt(m[1].replace(/,/g,''), 10);
+    if(v > 0 && v < 10000000) out.push(v);
+  }
+  return out;
+}
+function parseReceipt(raw){
+  const lines = normalize(raw).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const compacts = lines.map(s => s.replace(/\s+/g, ''));
+  const res = {amount:null, date:null, store:null};
+
+  // --- 日付 ---
+  for(let i = 0; i < compacts.length; i++){
+    const c = compacts[i], spaced = lines[i];
+    let m = c.match(/(20\d{2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/);
+    let y, mo, d;
+    if(m){ y=+m[1]; mo=+m[2]; d=+m[3]; }
+    else if((m = c.match(/(?:令和|R)(\d{1,2}|元)[年\.\/](\d{1,2})[月\.\/](\d{1,2})/))){ y = 2018 + (m[1]==='元'?1:+m[1]); mo=+m[2]; d=+m[3]; }
+    else if((m = spaced.match(/(?:^|[^\d])(\d{2})[\/\.](\d{1,2})[\/\.](\d{1,2})(?:[^\d]|$)/))){ y = 2000 + +m[1]; mo=+m[2]; d=+m[3]; }
+    if(y && mo>=1 && mo<=12 && d>=1 && d<=31){ res.date = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`; break; }
+  }
+
+  // --- 合計金額 ---
+  const NG = /小計|対象|内税|外税|消費税|税率|内消費|お?預[りか]|釣|おつり|ポイント|値引|割引|点数|個数|買上点/;
+  const KEY = [/合計|総合計|総計/, /お?買[い]?上げ?|お買上/, /ご?請求|お?支払|領収金額|決済金額/];
+  let found = null;
+  for(const key of KEY){
+    for(let i = 0; i < compacts.length && found === null; i++){
+      const c = compacts[i];
+      if(!key.test(c) || NG.test(c)) continue;
+      const after = c.replace(/^.*?(合計|総合計|総計|お?買い?上げ?|お買上|ご?請求|お?支払|領収金額|決済金額)/, '');
+      let nums = amountsIn(after);
+      if(!nums.length && compacts[i+1] && !NG.test(compacts[i+1])) nums = amountsIn(compacts[i+1]); // 金額が次の行にある場合
+      if(nums.length) found = nums[nums.length - 1];
+    }
+    if(found !== null) break;
+  }
+  if(found === null){
+    // 見つからなければ「¥」付きの金額のうち一番大きいもの(お預り・お釣りの行は除く)
+    let best = 0;
+    compacts.forEach(c => {
+      if(NG.test(c) || /TEL|電話|No\.|番号|レジ/i.test(c)) return;
+      const m = c.match(/[¥\\](\d{1,3}(?:,\d{3})+|\d+)/g);
+      if(m) m.forEach(s => { const v = parseInt(s.replace(/[¥\\,]/g,''),10); if(v > best && v < 10000000) best = v; });
+    });
+    if(best) found = best;
+  }
+  res.amount = found;
+
+  // --- お店の名前(上のほうの、文字が多めの行) ---
+  const SKIP = /領収|レシート|明細|ご来店|ありがとう|いらっしゃい|TEL|電話|〒|http|www|^\d|登録番号|責|レジ|No\./i;
+  for(const c of compacts.slice(0, 8)){
+    if(SKIP.test(c)) continue;
+    const letters = (c.match(/[ぁ-んァ-ヶ一-龠a-zA-Z]/g) || []).length;
+    if(letters >= 2 && letters / c.length > 0.5){ res.store = c.slice(0, 30); break; }
+  }
+  return res;
+}
+
+// 写真を読み取りやすく整える(縮小・白黒・コントラスト強め)
+function prepareImage(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1800;
+      const s = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+      const px = ctx.getImageData(0, 0, w, h), d = px.data;
+      for(let i = 0; i < d.length; i += 4){
+        let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+        g = Math.max(0, Math.min(255, (g - 128) * 1.6 + 140));
+        d[i] = d[i+1] = d[i+2] = g;
+      }
+      ctx.putImageData(px, 0, 0);
+      URL.revokeObjectURL(img.src);
+      resolve(cv);
+    };
+    img.onerror = () => reject(new Error('画像を開けませんでした'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+let tessLoading = null;
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  if(tessLoading) return tessLoading;
+  tessLoading = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = res; s.onerror = () => { tessLoading = null; rej(new Error('読み取りの部品を読み込めませんでした(ネット接続を確認してください)')); };
+    document.head.appendChild(s);
+  });
+  return tessLoading;
+}
+$('ocrFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  const prog = $('ocrProg'), bar = prog.firstElementChild, msg = $('ocrMsg');
+  $('ocrPreview').src = URL.createObjectURL(f); $('ocrPreview').classList.remove('hide');
+  prog.classList.remove('hide'); bar.style.width = '5%';
+  msg.textContent = '準備しています…(はじめての時は日本語データの読み込みに少し時間がかかります)';
+  let worker;
+  try{
+    await loadTesseract();
+    const canvas = await prepareImage(f);
+    worker = await Tesseract.createWorker('jpn', 1, {
+      logger: m => {
+        if(m.status === 'recognizing text'){ bar.style.width = (20 + m.progress * 80).toFixed(0) + '%'; msg.textContent = '文字を読み取っています… ' + Math.round(m.progress*100) + '%'; }
+        else if(m.progress != null){ bar.style.width = (5 + m.progress * 15).toFixed(0) + '%'; }
+      }
+    });
+    const { data } = await worker.recognize(canvas);
+    const r = parseReceipt(data.text || '');
+    $('ocrRaw').textContent = data.text || '';
+    $('ocrRawWrap').classList.remove('hide');
+    resetForm(); setTxType('expense');
+    if(r.amount) $('fAmount').value = r.amount;
+    if(r.date) $('fDate').value = r.date;
+    if(r.store) $('fStore').value = r.store;
+    const got = [r.amount ? `金額 ${yen(r.amount)}` : null, r.date ? `日付 ${r.date}` : null, r.store ? `お店 ${r.store}` : null].filter(Boolean);
+    msg.textContent = got.length
+      ? `読み取りました:${got.join('、')}。支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
+      : 'うまく読み取れませんでした。明るい場所で、レシートをまっすぐ写して撮り直すか、手で入力してください。';
+    bar.style.width = '100%';
+    $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
+  }catch(err){
+    msg.textContent = '読み取りに失敗しました:' + (err && err.message ? err.message : err);
+  }finally{
+    if(worker) try{ await worker.terminate(); }catch(_){}
+    setTimeout(() => prog.classList.add('hide'), 800);
+  }
+});
+
+/* ===== 全体の描き直し ===== */
+function render(){
+  $('whoLabel').textContent = '👤 ' + profiles.current;
+  if(curPanel === 'home') renderHome();
+  if(curPanel === 'input') fillSelects();
+  if(curPanel === 'history') renderHistory();
+  if(curPanel === 'accounts') renderAccounts();
+  if(curPanel === 'settings') renderSettings();
+}
+resetForm(); setTxType('expense'); setAccType('cash'); render();
+</script>
+</body>
+</html>
