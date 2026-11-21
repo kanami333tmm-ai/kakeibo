@@ -107,7 +107,8 @@
         <input type="file" id="ocrFile" accept="image/*" class="hide">
         <button class="btn" style="margin-top:0" onclick="document.getElementById('ocrCam').click()">📷 カメラでレシートを撮る</button>
         <button class="btn sub" style="margin-top:8px" onclick="document.getElementById('ocrFile').click()">🖼 撮ってある写真から選ぶ</button>
-        <div class="note" style="text-align:left;margin-top:8px">
+        <div class="note" id="aiHint" style="text-align:left;margin-top:8px"></div>
+        <div class="note" style="text-align:left;margin-top:4px">
           <b>きれいに読むコツ:</b>レシートを真上から、画面いっぱいに撮る/暗い色の机など、レシートと色の違う場所に置く/影や折れ目が入らないようにする
         </div>
         <details style="text-align:left;margin-top:6px"><summary>うまく読めないとき(iPhoneの文字読み取りを使う)</summary>
@@ -205,6 +206,30 @@
       <label>支出の分類(「、」区切り)</label><textarea id="catExp" rows="3"></textarea>
       <label>収入の分類(「、」区切り)</label><textarea id="catInc" rows="2"></textarea>
       <button class="btn sub" id="saveCats">分類を保存</button>
+    </div>
+    <div class="card">
+      <h2>AIでレシートを読む(Gemini)</h2>
+      <div class="note">GoogleのAI「Gemini」を使うと、カメラで撮ったレシートの合計・日付・お店を正確に読めます。使うには「APIキー」(Googleからもらう合言葉)を1回だけ入れてください。キーはこの端末の中だけに保存されます。</div>
+      <div class="note" id="aiStatus" style="margin-top:8px"></div>
+      <label>APIキー</label>
+      <input type="password" id="aiKey" autocomplete="off" placeholder="AIza で始まる文字を貼り付け">
+      <div class="two">
+        <div><button class="btn" id="aiSave">保存して確かめる</button></div>
+        <div><button class="btn danger" id="aiClear">キーを消す</button></div>
+      </div>
+      <details style="margin-top:10px"><summary>APIキーのもらい方</summary>
+        <ol class="note" style="padding-left:18px;margin:6px 0">
+          <li>Safari で <b>aistudio.google.com/apikey</b> を開き、Googleアカウントでログインします。</li>
+          <li>「APIキーを作成」(英語表示なら「Create API key」)を押します。</li>
+          <li>表示された「AIza…」で始まる文字をコピーし、上の欄に貼り付けて「保存して確かめる」を押します。</li>
+        </ol>
+        <div class="note">※無料枠の範囲で使えます(支払い情報を登録しなければ料金はかかりません)。無料枠では、送ったレシート画像がGoogleのサービス改善に使われることがあります。</div>
+      </details>
+      <details style="margin-top:6px"><summary>くわしい設定(ふつうは変更不要)</summary>
+        <label>使うモデル(左から順に試します・「,」区切り)</label>
+        <input type="text" id="aiModels">
+        <button class="btn sub" id="aiModelsSave">モデルを保存</button>
+      </details>
     </div>
     <div class="card">
       <h2>バックアップ</h2>
@@ -544,10 +569,110 @@ function renderAccounts(){
 }
 
 /* ===== 設定 ===== */
+/* ===== AI読み取り(Gemini)の設定 ===== */
+const AI_KEY = 'kakeibo_gemini_key', AI_MODELS_KEY = 'kakeibo_gemini_models';
+const AI_DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const aiKey = () => { try{ return localStorage.getItem(AI_KEY) || ''; }catch(e){ return ''; } };
+const aiModels = () => { const m = load(AI_MODELS_KEY, null); return Array.isArray(m) && m.length ? m : AI_DEFAULT_MODELS.slice(); };
+function renderAi(){
+  const k = aiKey();
+  $('aiStatus').innerHTML = k ? '✅ 設定ずみです。レシートを撮ると、AIで読み取ります。' : '⚪ まだ設定していません(今は端末の中の読み取りを使います)。';
+  $('aiKey').value = '';
+  $('aiModels').value = aiModels().join(', ');
+}
+$('aiSave').addEventListener('click', async () => {
+  const k = $('aiKey').value.trim();
+  if(!k){ toast('APIキーを貼り付けてください'); return; }
+  $('aiStatus').textContent = '確かめています…';
+  try{
+    await geminiCall(k, [{text: '「OK」とだけ返してください。'}], false);
+    try{ localStorage.setItem(AI_KEY, k); }catch(e){}
+    renderAi(); toast('AI読み取りを設定しました');
+  }catch(err){
+    $('aiStatus').textContent = '❌ うまくつながりませんでした:' + err.message + '(キーが正しいか確かめてください)';
+  }
+});
+$('aiClear').addEventListener('click', () => {
+  if(!confirm('この端末からAPIキーを消しますか?')) return;
+  try{ localStorage.removeItem(AI_KEY); }catch(e){}
+  renderAi(); toast('消しました');
+});
+$('aiModelsSave').addEventListener('click', () => {
+  const list = $('aiModels').value.split(/[,、\s]+/).map(s => s.trim()).filter(Boolean);
+  save(AI_MODELS_KEY, list.length ? list : AI_DEFAULT_MODELS); renderAi(); toast('保存しました');
+});
+
+// Gemini を呼ぶ。使えないモデルなら次の候補を試す
+async function geminiCall(key, parts, wantJson){
+  let lastErr = null;
+  for(const model of aiModels()){
+    let res;
+    try{
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'x-goog-api-key': key},
+        body: JSON.stringify({ contents: [{ role: 'user', parts }],
+          generationConfig: Object.assign({ temperature: 0 }, wantJson ? { responseMimeType: 'application/json' } : {}) })
+      });
+    }catch(e){ throw new Error('インターネットにつながりませんでした'); }
+    if(res.ok){
+      const j = await res.json();
+      const text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map(p => p.text || '').join('');
+      if(!text) throw new Error('AIから答えが返りませんでした');
+      return text;
+    }
+    let detail = ''; try{ detail = ((await res.json()).error || {}).message || ''; }catch(e){}
+    if(res.status === 404){ lastErr = new Error('モデル ' + model + ' が使えません'); continue; }   // 次のモデルへ
+    if(res.status === 400 && /API key/i.test(detail)) throw new Error('APIキーが正しくありません');
+    if(res.status === 401 || res.status === 403) throw new Error('APIキーが使えません');
+    if(res.status === 429) throw new Error('無料で使える回数を超えました。少し時間をおいてください');
+    lastErr = new Error('エラー ' + res.status + (detail ? '(' + detail.slice(0, 80) + ')' : ''));
+    if(res.status >= 500) continue;
+    throw lastErr;
+  }
+  throw lastErr || new Error('使えるモデルがありませんでした');
+}
+
+// 写真を小さめのJPEGにして送る(通信量と時間を減らすため)
+function photoToJpegBase64(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1600, s = Math.min(1, MAX / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(img.src);
+      resolve(cv.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = () => reject(new Error('画像を開けませんでした'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// AIにレシートを読んでもらう → {store, date, total, category}
+async function readReceiptByAI(file){
+  const b64 = await photoToJpegBase64(file);
+  const cats = D.cats.expense.join('、');
+  const prompt = `これは日本のレシートの写真です。次の項目を読み取り、JSONだけを返してください。
+{"store": お店の名前(チェーン名と店舗名。例「トップワン 松葉公園店」。読めなければ空文字),
+ "date": 買い物の日付 "YYYY-MM-DD"(和暦は西暦に直す。読めなければ空文字),
+ "total": 支払った合計金額(整数・円)。「総合計」があればそれ、なければ「合計」。税込みの最終金額。「お預り」「お釣り」「小計」「税抜」の金額は使わない。読めなければ null,
+ "category": 品物から考えて、次の分類のうち最も合うもの1つ:${cats}}`;
+  const text = await geminiCall(aiKey(), [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: prompt }], true);
+  const m = text.match(/\{[\s\S]*\}/);
+  if(!m) throw new Error('AIの答えを読めませんでした');
+  const j = JSON.parse(m[0]);
+  const total = Math.round(Number(String(j.total ?? '').replace(/[^\d.]/g, '')));
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : null;
+  return { store: String(j.store || '').trim().slice(0, 40), date, amount: total > 0 ? total : null,
+           category: D.cats.expense.includes(j.category) ? j.category : null };
+}
+
 function renderSettings(){
   $('profileSel').innerHTML = profiles.list.map(n => `<option ${n===profiles.current?'selected':''}>${esc(n)}</option>`).join('');
   $('catExp').value = D.cats.expense.join('、');
   $('catInc').value = D.cats.income.join('、');
+  renderAi();
 }
 function switchProfile(name){
   profiles.current = name; save(PKEY, profiles);
@@ -824,6 +949,18 @@ async function onReceiptPhoto(e){
   const prog = $('ocrProg'), bar = prog.firstElementChild, msg = $('ocrMsg');
   $('ocrPreview').src = URL.createObjectURL(f); $('ocrPreview').classList.remove('hide');
   prog.classList.remove('hide'); bar.style.width = '5%'; msg.classList.remove('ok'); showCands([]);
+  if(aiKey()){
+    msg.textContent = 'AIで読み取っています…(数秒かかります)'; bar.style.width = '40%';
+    try{
+      const r = await readReceiptByAI(f);
+      applyAiResult(r);
+      bar.style.width = '100%'; setTimeout(() => prog.classList.add('hide'), 800);
+      return;
+    }catch(err){
+      toast('AIで読めなかったので、端末の中で読み取ります');
+      msg.textContent = 'AIで読み取れませんでした(' + err.message + ')。端末の中で読み取ります…';
+    }
+  }
   msg.textContent = '準備しています…(はじめての時は日本語データの読み込みに少し時間がかかります)';
   let worker;
   try{
@@ -848,6 +985,25 @@ async function onReceiptPhoto(e){
 }
 $('ocrFile').addEventListener('change', onReceiptPhoto);
 $('ocrCam').addEventListener('change', onReceiptPhoto);
+
+// AIの読み取り結果を入力欄に入れる
+function applyAiResult(r){
+  const msg = $('ocrMsg');
+  resetForm(); setTxType('expense');
+  if(r.amount) $('fAmount').value = r.amount;
+  if(r.date) $('fDate').value = r.date;
+  if(r.store) $('fStore').value = r.store;
+  if(r.category) $('fCat').value = r.category;
+  const got = [r.amount ? `金額 ${yen(r.amount)}` : null, r.date ? `日付 ${r.date}` : null, r.store ? `お店 ${r.store}` : null, r.category ? `分類 ${r.category}` : null].filter(Boolean);
+  const miss = [!r.amount ? '金額' : null, !r.date ? '日付(今日の日付を入れています)' : null, !r.store ? 'お店' : null].filter(Boolean);
+  msg.classList.remove('ok');
+  msg.textContent = got.length
+    ? `🤖 AIで読み取りました:${got.join('、')}。` + (miss.length ? `読み取れなかったもの:${miss.join('、')}。` : '') + '支払い元を選んで、内容を確かめてから保存してください。'
+    : 'AIでも読み取れませんでした。撮り直すか、手で入力してください。';
+  $('ocrRaw').textContent = JSON.stringify(r, null, 1); $('ocrRawWrap').classList.remove('hide');
+  showCands([]);
+  $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
+}
 
 // 読み取った文字から、金額・日付・お店を入力欄に入れる(写真・貼り付け共通)
 function applyReceiptText(text){
@@ -888,7 +1044,9 @@ $('pasteGo').addEventListener('click', () => {
 function render(){
   $('whoLabel').textContent = '👤 ' + profiles.current;
   if(curPanel === 'home') renderHome();
-  if(curPanel === 'input') fillSelects();
+  if(curPanel === 'input'){ fillSelects();
+    $('aiHint').innerHTML = aiKey() ? '🤖 <b>AI読み取り:オン</b>(合計・日付・お店・分類を読みます)'
+      : '💡 「⚙️ 設定」→「AIでレシートを読む」を設定すると、ずっと正確に読めます。'; }
   if(curPanel === 'history') renderHistory();
   if(curPanel === 'accounts') renderAccounts();
   if(curPanel === 'settings') renderSettings();
