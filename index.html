@@ -103,14 +103,19 @@
     <div class="card">
       <h2>レシートから読み取る</h2>
       <div id="ocrBox">
-        <div class="note" style="text-align:left">
-          <b>おすすめ(正確):</b>iPhoneのカメラか写真アプリで、レシートの文字を長押し →「すべてを選択」→「コピー」してから、下のボタンを押してください。
-        </div>
-        <button class="btn" style="margin-top:8px" id="pasteBtn">📋 コピーした文字から読み取る</button>
-        <textarea id="pasteArea" rows="4" class="hide" style="margin-top:8px" placeholder="ここを長押しして「ペースト」してください"></textarea>
-        <button class="btn sub hide" id="pasteGo" style="margin-top:6px">この文字から読み取る</button>
+        <input type="file" id="ocrCam" accept="image/*" capture="environment" class="hide">
         <input type="file" id="ocrFile" accept="image/*" class="hide">
-        <button class="btn sub" style="margin-top:10px" onclick="document.getElementById('ocrFile').click()">📷 写真から読み取る(かんたん・精度は低め)</button>
+        <button class="btn" style="margin-top:0" onclick="document.getElementById('ocrCam').click()">📷 カメラでレシートを撮る</button>
+        <button class="btn sub" style="margin-top:8px" onclick="document.getElementById('ocrFile').click()">🖼 撮ってある写真から選ぶ</button>
+        <div class="note" style="text-align:left;margin-top:8px">
+          <b>きれいに読むコツ:</b>レシートを真上から、画面いっぱいに撮る/暗い色の机など、レシートと色の違う場所に置く/影や折れ目が入らないようにする
+        </div>
+        <details style="text-align:left;margin-top:6px"><summary>うまく読めないとき(iPhoneの文字読み取りを使う)</summary>
+          <div class="note" style="margin-top:6px">カメラか写真アプリでレシートの文字を長押し →「すべてを選択」→「コピー」してから、下のボタンを押してください。</div>
+          <button class="btn sub" style="margin-top:6px" id="pasteBtn">📋 コピーした文字から読み取る</button>
+          <textarea id="pasteArea" rows="4" class="hide" style="margin-top:8px" placeholder="ここを長押しして「ペースト」してください"></textarea>
+          <button class="btn sub hide" id="pasteGo" style="margin-top:6px">この文字から読み取る</button>
+        </details>
         <img id="ocrPreview" class="hide" alt="">
         <div class="prog hide" id="ocrProg"><div></div></div>
         <div class="note" id="ocrMsg" style="margin-top:6px">読み取った金額・日付・お店の名前を下の入力欄に入れます。内容を確かめてから保存してください。</div>
@@ -712,11 +717,11 @@ function parseReceipt(raw){
   }
   // 「合計」の行から読めなかったときは、「税抜き対象額＋外税額」で合計を計算する
   // 例:(外8% 対象 ¥1,184) と 外8% ¥94 → 1,184＋94＝1,278
-  if(!fromKey){
+  {
     const amts = [];
     mc.forEach(c => {
       if(/TEL|電話|No\.|番号|レジ|責|@|年|月|:/i.test(c)) return;
-      if(!/%|対象|タイショウ|ﾀｲｼｮｳ|税/.test(c)) return;      // 税の行(「外8%」「税抜対象額」など)の金額だけを使う
+      if(!/%|対象|タイ|ﾀｲ|税|外\d/.test(c)) return;      // 税の行(「外8%」「税抜対象額」など)の金額だけを使う
       (c.match(/¥(\d{1,3}(?:,\d{3})+|\d+)|\d{1,3}(?:,\d{3})+/g) || []).forEach(s => amts.push(parseInt(s.replace(/[¥,]/g, ''), 10)));
     });
     let taxTotal = 0; const used = new Set();
@@ -725,7 +730,12 @@ function parseReceipt(raw){
       const tax = amts.find(t => !used.has(t) && t !== base && [0.08, 0.10].some(r => Math.abs(t - base * r) <= 1));
       if(tax !== undefined){ taxTotal += base + tax; used.add(base); used.add(tax); }
     });
-    if(taxTotal && (found === null || found !== taxTotal)){ found = taxTotal; fromKey = true; }
+    // 1文字だけ違う数字(1,273 と 1,278 など)は、読み違いとみなす
+    const similar = (a, b) => { const x = String(a), y = String(b); return x.length === y.length && [...x].filter((ch, n) => ch !== y[n]).length <= 1; };
+    if(taxTotal && found !== taxTotal){
+      // 「合計」行が読めなかった/税から計算した額より小さい(ありえない)/1文字違い → 計算した額を使う
+      if(!fromKey || found === null || found < taxTotal || similar(found, taxTotal)){ found = taxTotal; fromKey = true; }
+    }
   }
   // 「合計」の行から読めなかったときは、小計を手がかりにする(合計は 小計〜小計＋税10% の範囲)
   if(!fromKey){
@@ -809,7 +819,7 @@ function loadTesseract(){
   });
   return tessLoading;
 }
-$('ocrFile').addEventListener('change', async e => {
+async function onReceiptPhoto(e){
   const f = e.target.files[0]; e.target.value = ''; if(!f) return;
   const prog = $('ocrProg'), bar = prog.firstElementChild, msg = $('ocrMsg');
   $('ocrPreview').src = URL.createObjectURL(f); $('ocrPreview').classList.remove('hide');
@@ -835,7 +845,9 @@ $('ocrFile').addEventListener('change', async e => {
     if(worker) try{ await worker.terminate(); }catch(_){}
     setTimeout(() => prog.classList.add('hide'), 800);
   }
-});
+}
+$('ocrFile').addEventListener('change', onReceiptPhoto);
+$('ocrCam').addEventListener('change', onReceiptPhoto);
 
 // 読み取った文字から、金額・日付・お店を入力欄に入れる(写真・貼り付け共通)
 function applyReceiptText(text){
