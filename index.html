@@ -710,6 +710,23 @@ function parseReceipt(raw){
     });
     if(best) found = best;
   }
+  // 「合計」の行から読めなかったときは、「税抜き対象額＋外税額」で合計を計算する
+  // 例:(外8% 対象 ¥1,184) と 外8% ¥94 → 1,184＋94＝1,278
+  if(!fromKey){
+    const amts = [];
+    mc.forEach(c => {
+      if(/TEL|電話|No\.|番号|レジ|責|@|年|月|:/i.test(c)) return;
+      if(!/%|対象|タイショウ|ﾀｲｼｮｳ|税/.test(c)) return;      // 税の行(「外8%」「税抜対象額」など)の金額だけを使う
+      (c.match(/¥(\d{1,3}(?:,\d{3})+|\d+)|\d{1,3}(?:,\d{3})+/g) || []).forEach(s => amts.push(parseInt(s.replace(/[¥,]/g, ''), 10)));
+    });
+    let taxTotal = 0; const used = new Set();
+    [...new Set(amts)].sort((a, b) => b - a).forEach(base => {
+      if(used.has(base) || base < 50) return;
+      const tax = amts.find(t => !used.has(t) && t !== base && [0.08, 0.10].some(r => Math.abs(t - base * r) <= 1));
+      if(tax !== undefined){ taxTotal += base + tax; used.add(base); used.add(tax); }
+    });
+    if(taxTotal && (found === null || found !== taxTotal)){ found = taxTotal; fromKey = true; }
+  }
   // 「合計」の行から読めなかったときは、小計を手がかりにする(合計は 小計〜小計＋税10% の範囲)
   if(!fromKey){
     let sub = null;
@@ -740,9 +757,16 @@ function parseReceipt(raw){
 
   // --- お店の名前(上のほうの、文字が多めの行) ---
   const SKIP = /領収|レシート|明細|ご来店|ありがとう|いらっしゃい|TEL|電話|〒|http|www|^\d|登録番号|責|レジ|No\./i;
+  const cleanShop = c => {
+    let s = c.replace(/(☎|TEL|電話|℡).*$/i, '').replace(/\d{2,4}-\d{2,4}-\d{3,4}.*$/, '');
+    const k = s.lastIndexOf('店');
+    if(k >= 0 && /店(舗)?$/.test(s.slice(0, k + 1))) s = s.slice(0, k + 1);   // 「〜店」の後ろのゴミを切る
+    return s.slice(0, 30);
+  };
+  const half = compacts.slice(0, Math.max(10, Math.ceil(compacts.length / 2)));
+  const shop = half.find(c => !/責|登録番号|No\./i.test(c) && /店|ストア|マート|薬局|ドラッグ|商店|食堂/.test(c) && (c.match(/[ぁ-んァ-ヶ一-龠]/g) || []).length >= 3);
   const top = compacts.slice(0, 10).filter(c => !SKIP.test(c));
-  const shop = top.find(c => /店|ストア|マート|薬局|ドラッグ|商店|食堂/.test(c) && (c.match(/[ぁ-んァ-ヶ一-龠]/g) || []).length >= 3);
-  if(shop) res.store = shop.slice(0, 30);
+  if(shop) res.store = cleanShop(shop);
   else for(const c of top){
     const letters = (c.match(/[ぁ-んァ-ヶ一-龠a-zA-Z]/g) || []).length;
     if(letters >= 3 && letters / c.length > 0.6){ res.store = c.slice(0, 30); break; }
@@ -801,6 +825,7 @@ $('ocrFile').addEventListener('change', async e => {
         else if(m.progress != null){ bar.style.width = (5 + m.progress * 15).toFixed(0) + '%'; }
       }
     });
+    await worker.setParameters({ tessedit_pageseg_mode: '3' });   // 行の並びを自動で判断(レシート向き)
     const { data } = await worker.recognize(canvas);
     applyReceiptText(data.text || '');
     bar.style.width = '100%';
@@ -822,9 +847,10 @@ function applyReceiptText(text){
   if(r.date) $('fDate').value = r.date;
   if(r.store) $('fStore').value = r.store;
   const got = [r.amount ? `金額 ${yen(r.amount)}` : null, r.date ? `日付 ${r.date}` : null, r.store ? `お店 ${r.store}` : null].filter(Boolean);
+  const miss = [!r.amount ? '金額' : null, !r.date ? '日付(今日の日付を入れています)' : null, !r.store ? 'お店' : null].filter(Boolean);
   msg.classList.remove('ok');
   msg.textContent = got.length
-    ? `読み取りました:${got.join('、')}。支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
+    ? `読み取りました:${got.join('、')}。` + (miss.length ? `読み取れなかったもの:${miss.join('、')}。` : '') + `支払い元(現金・口座・クレカ)と分類を選んで、内容を確かめてから保存してください。`
     : 'うまく読み取れませんでした。手で入力してください。';
   showCands(r.candidates || [], r.amount);
   $('fAmount').scrollIntoView({behavior:'smooth', block:'center'});
